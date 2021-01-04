@@ -22,14 +22,16 @@ from collections import Counter
 # https://github.com/briney/nwalign3
 # ftp://ftp.ncbi.nih.gov/blast/matrices/
 import nwalign3 as nw
+from operator import itemgetter
 
-__author__ = "Your Name"
+
+__author__ = "Sarah Rajaosafara"
 __copyright__ = "Universite Paris Diderot"
-__credits__ = ["Your Name"]
+__credits__ = ["Sarah Rajaosafara"]
 __license__ = "GPL"
 __version__ = "1.0.0"
-__maintainer__ = "Your Name"
-__email__ = "your@email.fr"
+__maintainer__ = "Sarah Rajaosafara"
+__email__ = "rajaosafar@eisti.eu"
 __status__ = "Developpement"
 
 
@@ -55,7 +57,7 @@ def get_arguments():
     parser = argparse.ArgumentParser(description=__doc__, usage=
                                      "{0} -h"
                                      .format(sys.argv[0]))
-    parser.add_argument('-i', '-amplicon_file', dest='amplicon_file', type=isfile, required=True, 
+    parser.add_argument('-i', '-amplicon_file', dest='amplicon_file', type=isfile, required=True,
                         help="Amplicon is a compressed fasta file (.fasta.gz)")
     parser.add_argument('-s', '-minseqlen', dest='minseqlen', type=int, default = 400,
                         help="Minimum sequence length for dereplication")
@@ -70,11 +72,43 @@ def get_arguments():
     return parser.parse_args()
 
 def read_fasta(amplicon_file, minseqlen):
-    pass
+    with gzip.open(amplicon_file, "rt") as myfile:
+        sequence = ""
+        for line in myfile:
+            # Update the sequence if it is written on multiple lines
+            if not line.startswith(">"):
+                sequence += line.replace('\n', '')
+            # Yield the sequence
+            else :
+                if len(sequence) >= minseqlen:
+                    yield sequence
+                sequence = ""
+        # Yield the last sequence
+        if len(sequence) >= minseqlen:
+            yield sequence
 
 
 def dereplication_fulllength(amplicon_file, minseqlen, mincount):
-    pass
+    # Create a dictionnary with the occurence for each sequence
+    seq_dict = dict()
+    for seq in read_fasta(amplicon_file,minseqlen):
+        if seq in seq_dict.keys():
+            seq_dict[seq] += 1
+        else:
+            seq_dict[seq] = 1
+
+    # Create a list with all the sequences having an occurence >= mincount
+    seq_list = []
+    for seq, occ in seq_dict.items():
+        if occ >= mincount:
+            seq_list.append((seq,occ))
+
+    # Sort the list
+    seq_list.sort(key=itemgetter(1), reverse = True)
+
+    # Yield
+    for item in seq_list:
+        yield item
 
 
 def get_chunks(sequence, chunk_size):
@@ -84,7 +118,7 @@ def get_unique(ids):
     return {}.fromkeys(ids).keys()
 
 
-def common(lst1, lst2): 
+def common(lst1, lst2):
     return list(set(lst1) & set(lst2))
 
 def cut_kmer(sequence, kmer_size):
