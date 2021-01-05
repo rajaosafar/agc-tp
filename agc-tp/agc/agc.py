@@ -112,7 +112,12 @@ def dereplication_fulllength(amplicon_file, minseqlen, mincount):
 
 
 def get_chunks(sequence, chunk_size):
-    pass
+    segments = []
+    for k in range(4):
+        # Create 4 segments of size chunk_size
+        segments.append(sequence[k*chunk_size:(k+1)*chunk_size])
+    return segments
+
 
 def get_unique(ids):
     return {}.fromkeys(ids).keys()
@@ -121,14 +126,114 @@ def get_unique(ids):
 def common(lst1, lst2):
     return list(set(lst1) & set(lst2))
 
+
 def cut_kmer(sequence, kmer_size):
-    pass
+    for i, _ in enumerate(sequence):
+        # Only take kmer of size kmer_size
+        if i <= len(sequence)-kmer_size:
+            yield sequence[i:i+kmer_size]
+
 
 def get_identity(alignment_list):
-    pass
+    nb = 0
+    for i in range(len(alignment_list[0])):
+        # Count the number of similar letters
+        if alignment_list[0][i] == alignment_list[1][i]:
+            nb += 1
+    # Divide by the length
+    return nb / len(alignment_list[0]) * 100
+
+
+def get_unique_kmer(kmer_dict, sequence, id_seq, kmer_size):
+    # Get the kmers of the sequence
+    kmers = cut_kmer(sequence, kmer_size)
+    for kmer in kmers:
+        # If the kmer is in the keys, add id_seq to its list
+        if kmer in kmer_dict.keys():
+            kmer_dict[kmer].append(id_seq)
+        # Else create a new list
+        else:
+            kmer_dict[kmer] = [id_seq]
+    return kmer_dict
+
+
+def search_mates(kmer_dict, sequence, kmer_size):
+    list_ids = []
+    # Get all the ids
+    for kmer in cut_kmer(sequence, kmer_size):
+        if kmer in kmer_dict.keys():
+            for id in kmer_dict[kmer]:
+                list_ids.append(id)
+
+    # Keep the 8 most common ids
+    return [id for id, occ in Counter(list_ids).most_common(8)]
+
+
+def detect_chimera(perc_identity_matrix):
+    std_list = []
+    parent0 = []
+    parent1 = []
+    for line in perc_identity_matrix:
+        # Create a list of all the stds to compute the mean
+        std_list.append(statistics.stdev(line))
+        # If this segment is similar to the parent 0, add to the corresponding list
+        if line[0] > line[1]:
+            parent0.append(line)
+        # If this segment is similar to the parent 1, add to the corresponding list
+        else:
+            parent1.append(line)
+
+    # Check if this is a chimera
+    return statistics.mean(std_list) > 5 and len(parent0) > 0 and len(parent1) > 0
+
 
 def chimera_removal(amplicon_file, minseqlen, mincount, chunk_size, kmer_size):
-    pass
+
+    seq_list = list(dereplication_fulllength(amplicon_file, minseqlen, mincount))
+
+    # List of non chimera
+    references = seq_list[:2]
+
+    # List of possible chimera
+    candidates = seq_list[2:]
+
+    for candidate, occurence in candidates:
+
+        is_chimera = False
+
+        # 1. Divide each candidate in 4 segments of size L= chunk_size
+        segments_candidate = get_chunks(candidate, chunk_size)
+
+        # 2. For each segment, identify 8 sequences with similar kmers
+        kmer_dict = dict()
+        list_mates = []
+        for segment in segments_candidate:
+            for k in range(len(references)):
+                kmer_dict = get_unique_kmer({}, segment, k, kmer_size)
+                list_mates.append(set(search_mates(kmer_dict, segment, kmer_size)))
+
+        # 3. Find at least two parents
+        parents_ids = set.intersection(*list_mates)
+
+        # 4. Compute the similarities
+        if len(parents_ids) > 1:
+            perc_identity_matrix = [[] * 4]
+
+            # segments des parents
+            for id in list(parents_ids)[:2]:
+                segments_parent = get_chunks(reference[id], chunk_size)
+                for k in range(4):
+                    alignement = nw.global_align(segments_candidate[k], segments_parent[k], gap_open=-1, gap_extend=-1, matrix=os.path.abspath(os.path.join(os.path.dirname(__file__),"MATCH")))
+                    perc_identity_matrix[k].append(get_identity(alignement))
+
+            is_chimera = detect_chimera(perc_identity_matrix)
+
+        if not is_chimera:
+            references.append((candidate, occurence))
+
+    for reference, occurence in references:
+        yield reference, occurence
+
 
 def abundance_greedy_clustering(amplicon_file, minseqlen, mincount, chunk_size, kmer_size):
     pass
@@ -138,7 +243,12 @@ def fill(text, width=80):
     return os.linesep.join(text[i:i+width] for i in range(0, len(text), width))
 
 def write_OTU(OTU_list, output_file):
-    pass
+    # Write each OTU to the file
+    with open(output_file, "wt") as myfile:
+        for i, (otu, occ) in enumerate(OTU_list):
+            myfile.write(">OTU_"+str(i+1)+ " occurrence:"+str(occ)+"\n")
+            myfile.write(fill(otu, width=80)+"\n")
+
 #==============================================================
 # Main program
 #==============================================================
@@ -148,6 +258,12 @@ def main():
     """
     # Get arguments
     args = get_arguments()
+
+    amplicon_file = args.amplicon_file
+    minseqlen = args.minseqlen
+    mincount = args.mincount
+    chunk_size = args.chunk_size
+    kmer_size = args.kmer_size
 
 
 if __name__ == '__main__':
